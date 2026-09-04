@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "628448964786",
+    "project_id": "shootero-real-cash-payday",
+    "storage_bucket": "shootero-real-cash-payday.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:628448964786:android:54290f9f505fc0174299ab",
+        "android_client_info": {
+          "package_name": "com.pid.shooterocash"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAn9J6fIOmRGYGNej1n19S8Sj8wI5ZgQnw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

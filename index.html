@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
+    <title>Shootero</title>
+    <link rel="icon" type="image/png" href="TemplateData/game-icon.png">
+    <link rel="stylesheet" href="TemplateData/style.css">
+    <style>
+      /* ===== Ideofuzion template - responsive letterbox + loading UI =====
+         All overrides live inline here because Unity regenerates TemplateData/style.css
+         on every build; !important beats it. Shootero is a portrait (9:16) game. */
+
+      html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%;
+        overflow: hidden; background: #0e0e12;
+        touch-action: none;                 /* don't let the browser eat drags/clicks */
+        -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+      }
+
+      /* Full-viewport shell. The game's own key art, blurred and darkened, sits behind the
+         loading icon and progress bar so the player can tell what is loading.
+
+         `cover`, never `100% 100%`: cover crops, stretch distorts, and portrait art pulled
+         into a wide letterboxed viewport looks broken.
+
+         #0e0e12 stays underneath as the fallback while the JPG is still arriving, and is
+         what paints the letterbox bars. It must stay identical to GROUND in
+         Tools/bake_loading_bg.py, which composites the art over that exact colour.
+
+         The JPG is baked -- never a CSS filter: blur(). A full-screen blur is expensive on
+         phones and this screen renders while the device is downloading tens of megabytes of
+         wasm. Rebuild it with:  python Tools/bake_action_bg.py && python Tools/bake_loading_bg.py */
+      #unity-container {
+        position: fixed; inset: 0;
+        background: #0e0e12 url('TemplateData/loading-bg.jpg') center / cover no-repeat;
+      }
+
+      /* Canvas is positioned by JS (letterbox). Transparent so the backdrop shows through
+         while loading; Unity fills it once the game renders. */
+      #unity-canvas {
+        display: block; position: absolute;
+        background: transparent !important;
+      }
+
+      /* ---- Loading bar ---- */
+      #unity-loading-bar {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        display: none; z-index: 10; text-align: center;
+      }
+      #unity-logo {
+        width: 180px; height: 180px; margin: 0 auto 12px;
+        background: url('TemplateData/game-icon.png') center / contain no-repeat;
+      }
+      /* Spinner shown while the per-game icon is being fetched.
+         ABSOLUTELY POSITIONED, centred over the 180x180 logo box, so it takes up no space in
+         the layout. In normal flow its removal reflowed everything below it and the icon
+         visibly jumped upwards as it appeared. Out of flow, revealing the icon changes
+         nothing else on the screen.
+         Centred with left/top arithmetic rather than translate(-50%,-50%), because the spin
+         keyframe animates `transform` and would overwrite a translate. */
+      #unity-logo-spinner {
+        position: absolute;
+        left: calc(50% - 17px);      /* half the 34px width */
+        top: 73px;                   /* 90px (centre of logo box) - 17px */
+        width: 34px; height: 34px; margin: 0;
+        border: 3px solid rgba(255, 255, 255, 0.18);
+        border-top-color: rgba(255, 255, 255, 0.85);
+        border-radius: 50%;
+        animation: gb-spin 0.9s linear infinite;
+      }
+      @keyframes gb-spin { to { transform: rotate(360deg); } }
+      #unity-progress-bar-empty {                 /* track */
+        width: 300px; height: 18px; margin: 12px auto 0;
+        background: #d9d9d9 !important; background-image: none !important;
+        border-radius: 9px; overflow: hidden;
+      }
+      #unity-progress-bar-full {                  /* fill */
+        width: 0%; height: 100%;
+        background: #1C3A5B !important; background-image: none !important;
+        margin-top: 0 !important;                 /* fix: default style.css pushes it down */
+        border-radius: 9px; transition: width 0.1s ease;
+      }
+      #unity-progress-percent {                   /* % readout */
+        color: #F2F2F2; font: 14px arial, sans-serif; margin-top: 6px;
+      }
+
+      /* No footer in this build. */
+      #unity-footer { display: none !important; }
+      #unity-warning {
+        position: absolute; left: 50%; top: 5%; transform: translate(-50%);
+        background: white; padding: 10px; display: none; z-index: 20;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="unity-container">
+      <canvas id="unity-canvas" width=540 height=960 tabindex="-1"></canvas>
+      <div id="unity-loading-bar">
+        <div id="unity-logo"></div>
+        <div id="unity-logo-spinner"></div>
+        <div id="unity-progress-bar-empty"><div id="unity-progress-bar-full"></div></div>
+        <div id="unity-progress-percent">0%</div>
+      </div>
+      <div id="unity-warning"> </div>
+    </div>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+
+      // ===== Responsive letterbox: largest rect of the game's aspect that fits, centered =====
+      // Aspect comes from the player's web canvas size (Player Settings -> 1080 x 1920 = 9:16).
+      var GAME_ASPECT = 540 / 960;
+      function resizeCanvas() {
+        var availW = window.innerWidth, availH = window.innerHeight, w, h;
+        if (availW / availH > GAME_ASPECT) { h = availH; w = Math.round(h * GAME_ASPECT); }
+        else                               { w = availW; h = Math.round(w / GAME_ASPECT); }
+        canvas.style.width  = w + "px";
+        canvas.style.height = h + "px";
+        canvas.style.left   = Math.round((availW - w) / 2) + "px";
+        canvas.style.top    = Math.round((availH - h) / 2) + "px";
+      }
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      // ===== Single source of truth for the loading bar + percent =====
+      function setLoadProgress(p) {
+        var pct  = Math.round(p * 100);
+        var full = document.querySelector("#unity-progress-bar-full");
+        var txt  = document.querySelector("#unity-progress-percent");
+        if (full) full.style.width = pct + "%";
+        if (txt)  txt.innerText    = pct + "%";
+      }
+
+      function unityShowBanner(msg, type) {
+        var warningBanner = document.querySelector("#unity-warning");
+        function updateBannerVisibility() {
+          warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+        }
+        var div = document.createElement('div');
+        div.innerHTML = msg;
+        warningBanner.appendChild(div);
+        if (type == 'error') div.style = 'background: red; padding: 10px;';
+        else {
+          if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+          setTimeout(function () { warningBanner.removeChild(div); updateBannerVisibility(); }, 5000);
+        }
+        updateBannerVisibility();
+      }
+
+      var buildUrl = "Build";
+      var loaderUrl = buildUrl + "/webgl-prod.loader.js";
+      var config = {
+        arguments: [],
+        dataUrl: buildUrl + "/webgl-prod.data.unityweb",
+        frameworkUrl: buildUrl + "/webgl-prod.framework.js.unityweb",
+        codeUrl: buildUrl + "/webgl-prod.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "Shootero",
+        productName: "Shootero",
+        productVersion: "1.6",
+        showBanner: unityShowBanner,
+        // Render buffer tracks the CSS (letterboxed) canvas size -> responsive, no distortion.
+        matchWebGLToCanvasSize: true,
+      };
+
+      document.querySelector("#unity-loading-bar").style.display = "block";
+
+      // ===== Dynamic loading-screen icon (GameBull /context) =====
+      //
+      // The loading screen renders BEFORE Unity boots, so C# cannot set it — this has to
+      // happen here in the template's own JavaScript.
+      //
+      // The icon area starts HIDDEN, with only the spinner showing, and is revealed ONCE we
+      // know which icon to use. The first version revealed the built-in icon immediately and
+      // swapped later, which meant the wrong logo was on screen for the whole API round-trip
+      // and then visibly changed. Deciding before revealing removes the swap entirely.
+      //
+      // Hiding is done from JavaScript, not CSS, on purpose: if this script never runs (old
+      // browser, no fetch), the static icon still displays exactly as before.
+      //
+      // Runs before the loader <script> is appended so the API call goes out as early as
+      // possible. fetch() returns immediately, so the build download is not delayed.
+      //
+      // gameId is read from the launch URL and treated as REQUIRED rather than hardcoded: a
+      // hardcoded id that did not match this game would still be a VALID id for a different
+      // game, so a mismatch would quietly fetch that game's context and show its logo here.
+      (function applyPartnerLoadingIcon() {
+        // Never leave the player watching a spinner: whatever happens, something is shown
+        // by this deadline. Same value as the fetch abort, so the two cannot disagree.
+        var REVEAL_DEADLINE_MS = 4000;
+        var revealed = false;
+
+        // The single place the icon becomes visible. iconUrl == null means "use the built-in
+        // icon", which is already set in CSS.
+        function reveal(iconUrl) {
+          if (revealed) return;
+          revealed = true;
+          var el = document.querySelector("#unity-logo");
+          if (el) {
+            if (iconUrl) el.style.backgroundImage = 'url("' + iconUrl.replace(/"/g, "%22") + '")';
+            el.style.visibility = "visible";
+          }
+          var sp = document.querySelector("#unity-logo-spinner");
+          if (sp && sp.parentNode) sp.parentNode.removeChild(sp);
+        }
+
+        try {
+          var logo = document.querySelector("#unity-logo");
+          if (logo) logo.style.visibility = "hidden";
+          setTimeout(function () { reveal(null); }, REVEAL_DEADLINE_MS);
+
+          var q          = new URLSearchParams(window.location.search);
+          var tenantSlug = q.get("tenantSlug");
+          var token      = q.get("sessionToken") || q.get("bootToken") || q.get("token");
+          var gameId     = q.get("gameId");
+          // PRODUCTION default. ?apiBase= in the launch URL still wins, so a staging launch
+          // works without rebuilding. This must stay in step with GAMEBULL_PRODUCTION in
+          // Player Settings, which selects the C# side's base URL — see GameBullEnvironment.
+          var apiBase    = q.get("apiBase") || "https://api.g-b.store";
+
+          // Not launched from GameBull -> nothing to ask for, show the built-in icon at once
+          // rather than making the player wait out the deadline for nothing.
+          if (!tenantSlug || !token || !gameId) { reveal(null); return; }
+
+          var ctl = new AbortController();
+          setTimeout(function () { ctl.abort(); }, REVEAL_DEADLINE_MS);
+
+          fetch(apiBase.replace(/\/+$/, "")
+                  + "/play/games/" + encodeURIComponent(gameId)
+                  + "/context?tenantSlug=" + encodeURIComponent(tenantSlug),
+                { method: "GET",
+                  headers: { "Authorization": "Bearer " + token },
+                  signal: ctl.signal })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+              var c = (data && data.customization) || {};
+
+              // PER-GAME fields only, in this order. logoUrl / tenantLogoUrl are tenant-wide
+              // and have been seen returning another game's artwork; assets[] is the in-game
+              // art path owned by the C# SDK and is deliberately not read here.
+              var iconUrl =
+                (typeof c.gameLogoUrl   === "string" && c.gameLogoUrl)   ? c.gameLogoUrl   :
+                (typeof c.gameBannerUrl === "string" && c.gameBannerUrl) ? c.gameBannerUrl : null;
+
+              if (!iconUrl) { reveal(null); return; }   // admin set none -> built-in icon
+
+              // Preload, and reveal only once the bytes have actually decoded, so a slow or
+              // broken URL can never flash or blank the loading screen.
+              var img = new Image();
+              img.onload  = function () { reveal(iconUrl); };
+              img.onerror = function () { reveal(null); };
+              img.src = iconUrl;
+            })
+            .catch(function () { reveal(null); });      // 401 / network / abort -> built-in
+        } catch (e) { reveal(null); }                   // no fetch / no URLSearchParams
+      })();
+
+      var script = document.createElement("script");
+      script.src = loaderUrl;
+      script.onload = () => {
+        createUnityInstance(canvas, config, setLoadProgress).then((unityInstance) => {
+          window.unityInstance = unityInstance;
+
+          // Force 100% before hiding (Unity's onProgress plateaus at 0.9).
+          setLoadProgress(1);
+
+          // Safari/WebKit keeps painting loading elements even after display:none on a parent.
+          // Hide each explicitly, clear its background image, then REMOVE it from the DOM.
+          function killEl(sel) {
+            var el = document.querySelector(sel);
+            if (!el) return;
+            el.style.display = "none";
+            el.style.visibility = "hidden";
+            el.style.opacity = "0";
+            el.style.backgroundImage = "none";
+            if (el.parentNode) el.parentNode.removeChild(el);
+          }
+          killEl("#unity-logo");
+          killEl("#unity-logo-spinner");
+          killEl("#unity-progress-bar-full");
+          killEl("#unity-progress-bar-empty");
+          killEl("#unity-progress-percent");
+          killEl("#unity-loading-bar");
+
+          resizeCanvas();
+
+          // ===== Page <-> game bridge (GameBull) =====
+          // Shootero reads its boot params straight from the URL query string in
+          // GameBullBoot, so we only announce readiness here. If a SendMessage-style
+          // handshake is ever needed, forward the payload via
+          // unityInstance.SendMessage('<BridgeObject>', '<Method>', payload).
+          try { window.parent.postMessage({ type: 'game:ready' }, '*'); } catch (e) {}
+        }).catch((message) => { alert(message); });
+      };
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>
