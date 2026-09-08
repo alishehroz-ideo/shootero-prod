@@ -31,7 +31,14 @@
 
          The JPG is baked -- never a CSS filter: blur(). A full-screen blur is expensive on
          phones and this screen renders while the device is downloading tens of megabytes of
-         wasm. Rebuild it with:  python Tools/bake_action_bg.py && python Tools/bake_loading_bg.py */
+         wasm. Rebuild it with:  python Tools/bake_action_bg.py && python Tools/bake_loading_bg.py
+
+         THIS IS HALF THE CHANGE. Because this element is the full viewport and the canvas is
+         letterboxed inside it, this background also paints the LETTERBOX BARS -- so the image
+         MUST be taken back off once Unity renders, or it frames the game for the whole
+         session. That teardown lives beside the killEl() calls in
+         createUnityInstance().then() near the bottom of this file. Keep the two colours
+         identical. */
       #unity-container {
         position: fixed; inset: 0;
         background: #0e0e12 url('TemplateData/loading-bg.jpg') center / cover no-repeat;
@@ -282,6 +289,22 @@
           killEl("#unity-progress-bar-empty");
           killEl("#unity-progress-percent");
           killEl("#unity-loading-bar");
+
+          // The backdrop is a LOADING backdrop, so it comes down with the rest of the loading
+          // UI. #unity-container is the FULL VIEWPORT and the canvas is letterboxed inside it,
+          // so that background is also what paints the LETTERBOX BARS -- leaving the image set
+          // keeps a band of blurred key art above and below the game for the whole session,
+          // with a visible seam at the canvas edge. It does not read as a loading leftover, it
+          // reads as the game rendering wrong.
+          //
+          // killEl() above removes the spinner, icon and progress bar; nothing else clears the
+          // container. Drop it back to the flat ground colour the bars are meant to be.
+          //
+          // PAIRED WITH the #unity-container rule in the <style> block at the top of this file.
+          // Change the colour in one and change it in the other -- and it must stay identical
+          // to GROUND in Tools/bake_loading_bg.py, which composites the art over that value.
+          var container = document.querySelector("#unity-container");
+          if (container) container.style.background = "#0e0e12";
 
           resizeCanvas();
 
