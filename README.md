@@ -8,7 +8,16 @@ Served by GitHub Pages from the repository root:
 
 **This is the live URL handed to the GameBull admin panel. Never push a staging build here.**
 Before committing, check the built `index.html` — its `apiBase` default must read
-`https://api.g-b.store`, and no file in the folder may mention `api.staging.g-b.store`.
+`https://api.g-b.store` — and grep the BUILD FILES for the staging host:
+
+```
+grep -rl "api.staging" index.html Build TemplateData StreamingAssets
+```
+
+Scoped to those paths on purpose. Grepping the whole folder matches this README,
+which names the staging host twice, so the check appears to fail every time and
+stops being worth running.
+
 The staging build lives at
 [alishehroz-ideo/shootero-staging](https://github.com/alishehroz-ideo/shootero-staging).
 
